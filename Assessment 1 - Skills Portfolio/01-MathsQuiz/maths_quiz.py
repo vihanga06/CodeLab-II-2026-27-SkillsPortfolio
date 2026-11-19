@@ -121,3 +121,101 @@ class MathsQuiz:
             btn.pack(side="left")
             tk.Label(row, text=descriptions[num], font=(FONT, 11), bg=CARD,
                      fg=TEXT).pack(side="left", padx=18)
+            def randomInt(self, low, high):
+        # required function 2: picks a random integer between the min and max for that level
+                return random.randint(low, high)
+
+    def decideOperation(self):
+        # required function 3: randomly picks addition or subtraction and returns the character
+        return random.choice(["+", "-"])
+
+    def start_quiz(self, level):
+        # resets the score and question counter for a fresh 10 question run
+        self.level = level
+        self.q_num = 0
+        self.score = 0
+        self.history = []
+        self.next_question()
+
+    def next_question(self):
+        self.after_id = None
+        # once all 10 questions are done, jump to the final results screen
+        if self.q_num >= NUM_QUESTIONS:
+            self.displayResults(self.score)
+            return
+
+        self.q_num += 1
+        self.tries = 1
+        self.locked = False
+
+        name, low, high = LEVELS[self.level]
+        num1 = self.randomInt(low, high)
+        num2 = self.randomInt(low, high)
+        op = self.decideOperation()
+
+        # work out the real answer now so we can check against it on both attempts
+        if op == "+":
+            self.answer = num1 + num2
+        else:
+            self.answer = num1 - num2
+
+        self.displayProblem(num1, op, num2)
+
+    def displayProblem(self, num1, op, num2):
+        # required function 4: displays the current arithmetic problem and entry box
+        self.clear_body()
+        self.problem_text = f"{num1} {op} {num2} ="
+
+        top = tk.Frame(self.body, bg=BG)
+        top.pack(fill="x", pady=(0, 8))
+        tk.Label(top, text=f"{LEVELS[self.level][0]}  |  Question {self.q_num} of {NUM_QUESTIONS}",
+                 font=(FONT, 11, "bold"), bg=BG, fg=PRIMARY).pack(side="left")
+        self.score_label = tk.Label(top, text=f"Score: {self.score}", font=(FONT, 11, "bold"),
+                                    bg=BG, fg=TEXT)
+        self.score_label.pack(side="right")
+
+        # progress bar fills up as the user moves through the 10 questions
+        bar = ttk.Progressbar(self.body, maximum=NUM_QUESTIONS, value=self.q_num - 1)
+        bar.pack(fill="x", pady=(0, 14))
+
+        card = tk.Frame(self.body, bg=CARD, padx=24, pady=24)
+        card.pack(fill="both", expand=True)
+
+        self.tries_label = tk.Label(card, text="Attempt 1 of 2 (10 points)", font=(FONT, 10),
+                                    bg=CARD, fg=PRIMARY)
+        self.tries_label.pack(pady=(4, 10))
+
+        tk.Label(card, text=self.problem_text, font=(FONT, 36, "bold"),
+                 bg=CARD, fg=TEXT).pack(pady=10)
+
+        row = tk.Frame(card, bg=CARD)
+        row.pack(pady=12)
+        self.entry = tk.Entry(row, font=(FONT, 18), justify="center", width=10, bg=BG,
+                              fg=TEXT, insertbackground=TEXT, relief="flat",
+                              highlightthickness=2, highlightbackground=SECONDARY,
+                              highlightcolor=PRIMARY)
+        self.entry.pack(side="left", padx=(0, 10), ipady=5)
+        # put the cursor straight into the box so the user can just type without clicking
+        self.entry.focus_set()
+        # bind the enter key so pressing Return submits the answer just like the button
+        self.entry.bind("<Return>", lambda e: self.check_answer())
+        self.submit_btn = self.make_button(row, "Submit", self.check_answer)
+        self.submit_btn.pack(side="left")
+
+        self.feedback = tk.Label(card, text="Type your answer and hit Enter", font=(FONT, 11, "bold"),
+                                 bg=CARD, fg=TEXT, pady=8)
+        self.feedback.pack(side="bottom", fill="x")
+
+    def isCorrect(self, user_answer, correct_answer, tries):
+        # required function 5: checks the user answer, updates the feedback label and returns a bool
+        if user_answer == correct_answer:
+            # 10 points on attempt 1, 5 points on attempt 2
+            pts = 10 if tries == 1 else 5
+            self.feedback.config(text=f"Correct! +{pts} points", fg=PRIMARY)
+            return True
+        if tries == 1:
+            self.feedback.config(text="Not quite, have one more go for 5 points", fg=WRONG)
+        else:
+            self.feedback.config(text=f"Wrong again, the answer was {correct_answer}", fg=WRONG)
+        return False
+

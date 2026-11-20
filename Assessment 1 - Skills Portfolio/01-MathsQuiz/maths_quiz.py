@@ -121,9 +121,9 @@ class MathsQuiz:
             btn.pack(side="left")
             tk.Label(row, text=descriptions[num], font=(FONT, 11), bg=CARD,
                      fg=TEXT).pack(side="left", padx=18)
-            def randomInt(self, low, high):
-        # required function 2: picks a random integer between the min and max for that level
-                return random.randint(low, high)
+    def randomInt(self, low, high):
+    # required function 2: picks a random integer between the min and max for that level
+            return random.randint(low, high)
 
     def decideOperation(self):
         # required function 3: randomly picks addition or subtraction and returns the character
@@ -218,4 +218,93 @@ class MathsQuiz:
         else:
             self.feedback.config(text=f"Wrong again, the answer was {correct_answer}", fg=WRONG)
         return False
+    
+    def check_answer(self):
+        # ignore extra presses while waiting for root.after to load the next question
+        if self.locked:
+            return
+
+        # int() handles negative numbers like minus 15 but throws ValueError on letters or blanks
+        try:
+            user_answer = int(self.entry.get().strip())
+        except ValueError:
+            self.feedback.config(text="Enter a whole number (negatives are allowed)", fg=WRONG)
+            return
+
+        if self.isCorrect(user_answer, self.answer, self.tries):
+            pts = 10 if self.tries == 1 else 5
+            self.finish_question(user_answer, pts, 900)
+        elif self.tries == 1:
+            # wrong on first attempt: stay on the same problem and give one more try
+            self.tries = 2
+            self.tries_label.config(text="Attempt 2 of 2 (5 points)")
+            self.entry.delete(0, tk.END)
+            self.entry.focus_set()
+        else:
+            # wrong on second attempt too: award 0 points and pause slightly longer so they see the answer
+            self.finish_question(user_answer, 0, 1600)
+
+    def finish_question(self, user_answer, pts, delay):
+        # lock input right away so spamming Enter cannot add points twice
+        self.locked = True
+        self.submit_btn.config(state="disabled")
+        self.score += pts
+        self.score_label.config(text=f"Score: {self.score}")
+        # save a tuple for this question so we can list all 10 in the results table at the end
+        self.history.append((self.q_num, self.problem_text, user_answer, self.answer, self.tries, pts))
+        self.after_id = self.root.after(delay, self.next_question)
+
+    def get_rank(self, score):
+        # max score is 100, and the brief says A+ is for a score over 90
+        if score > 90:
+            return "A+"
+        elif score >= 80:
+            return "A"
+        elif score >= 70:
+            return "B"
+        elif score >= 60:
+            return "C"
+        elif score >= 50:
+            return "D"
+        return "F"
+
+    def displayResults(self, score):
+        # required function 6: shows the final score out of 100, the letter rank, and asks to play again
+        self.clear_body()
+        rank = self.get_rank(score)
+        correct = sum(1 for h in self.history if h[5] > 0)
+
+        top = tk.Frame(self.body, bg=CARD, padx=20, pady=14)
+        top.pack(fill="x", pady=(0, 10))
+        tk.Label(top, text=f"Rank: {rank}", font=(FONT, 24, "bold"), bg=CARD,
+                 fg=PRIMARY if score >= 50 else WRONG).pack(side="left", padx=(0, 24))
+        tk.Label(top, text=f"Final score: {score} / {NUM_QUESTIONS * 10}\n"
+                           f"Questions right: {correct} / {NUM_QUESTIONS}",
+                 font=(FONT, 12, "bold"), bg=CARD, fg=TEXT, justify="left").pack(side="left")
+
+        # summary table showing how each of the 10 questions went
+        cols = ("q", "problem", "yours", "answer", "tries", "pts")
+        heads = ("Q", "Question", "Your answer", "Right answer", "Attempts", "Points")
+        table = ttk.Treeview(self.body, columns=cols, show="headings", height=10)
+        for c, h in zip(cols, heads):
+            table.heading(c, text=h)
+            table.column(c, anchor="center", width=90)
+        for row in self.history:
+            table.insert("", "end", values=row)
+        table.pack(fill="both", expand=True, pady=(0, 10))
+
+        # replay bar at the bottom so the user can play again or pick a new level
+        bottom = tk.Frame(self.body, bg=CARD, padx=16, pady=10)
+        bottom.pack(fill="x")
+        tk.Label(bottom, text="Play again?", font=(FONT, 12, "bold"), bg=CARD,
+                 fg=TEXT).pack(side="left")
+        self.make_button(bottom, "Quit", self.quit_app, False).pack(side="right", padx=(8, 0))
+        self.make_button(bottom, "Change level", self.displayMenu, False).pack(side="right", padx=(8, 0))
+        self.make_button(bottom, "Yes, same level", lambda: self.start_quiz(self.level)).pack(side="right")
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = MathsQuiz(root)
+    root.mainloop()
 

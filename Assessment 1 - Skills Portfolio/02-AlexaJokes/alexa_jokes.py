@@ -106,3 +106,38 @@ class JokeApp:
             self.next_btn.config(state="disabled")
             self.setup_label.config(text="No jokes loaded")
 
+    def make_button(self, parent, text, command, primary):
+        # keeps all four buttons matching without repeating the style options
+        bg = PRIMARY if primary else CARD
+        fg = BG if primary else TEXT
+        return tk.Button(parent, text=text, command=command, font=(FONT, 10, "bold"),
+                         bg=bg, fg=fg, activebackground=PUNCH, activeforeground=BG,
+                         disabledforeground="#7FA3A0", relief="flat", padx=14, pady=8,
+                         cursor="hand2")
+
+    def tell_joke(self):
+        if not self.jokes:
+            return
+        joke = random.choice(self.jokes)
+        # pick again if we got the exact same joke that is already on screen
+        while joke == self.current and len(self.jokes) > 1:
+            joke = random.choice(self.jokes)
+        self.current = joke
+
+        # put the new setup on screen, hide the old punchline and unlock Show Punchline
+        self.setup_label.config(text=joke[0])
+        self.punch_label.config(text="")
+        self.punch_btn.config(state="normal")
+
+    def show_punchline(self):
+        if self.current is None:
+            return
+        self.punch_label.config(text=self.current[1])
+        # disable the button once the punchline is revealed so it feels responsive
+        self.punch_btn.config(state="disabled")
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = JokeApp(root)
+    root.mainloop()

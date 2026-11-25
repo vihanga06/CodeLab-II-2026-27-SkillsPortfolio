@@ -190,3 +190,281 @@ class MathsQuiz:
             w.bind("<Button-1>", lambda e, n=num: self.start_quiz(n))
             w.bind("<Enter>", lambda e: set_bg("#163021"))
             w.bind("<Leave>", lambda e: set_bg(BOARD))
+            
+# required brief function: picks a random integer inside the chosen difficulty range
+    def randomInt(self, lo, hi):
+        return random.randint(lo, hi)
+
+    # required brief function: randomly picks addition or subtraction
+    def decideOperation(self):
+        return random.choice(["+", "-"])
+
+    # resets quiz counters and kicks off question 1 for the picked difficulty
+    def start_quiz(self, level):
+        self.level = level
+        self.q_num = 0
+        self.score = 0
+        self.results = []
+        self.history = []
+        self.next_question()
+
+    # generates the next arithmetic sum or jumps to the results screen after 10 questions
+    def next_question(self):
+        self.next_timer = None
+        if self.q_num >= TOTAL_Q:
+            self.displayResults(self.score)
+            return
+
+        self.q_num += 1
+        self.tries = 1
+        self.locked = False
+
+        _, lo, hi = LEVELS[self.level]
+        a = self.randomInt(lo, hi)
+        b = self.randomInt(lo, hi)
+        op = self.decideOperation()
+        self.answer = a + b if op == "+" else a - b
+
+        self.displayProblem(a, op, b)
+
+    # required brief function: displays the current problem, progress dots and answer entry
+    def displayProblem(self, num1, op, num2):
+        self.clear_screen()
+        self.screen = "quiz"
+        self.problem_text = f"{num1} {op} {num2} ="
+
+        top = tk.Frame(self.body, bg=BOARD, height=42)
+        top.pack(fill="x")
+        top.pack_propagate(False)
+        tk.Label(top, text=f"{LEVELS[self.level][0]} level", font=(self.ui_font, 11, "bold"),
+                 bg=BOARD, fg="#9FB8A7").pack(side="left")
+        self.score_lbl = tk.Label(top, text=f"Score  {self.score}", font=(self.chalk_font, 16, "bold"),
+                                  bg=BOARD, fg=YELLOW)
+        self.score_lbl.pack(side="right")
+
+        self.dots = tk.Canvas(self.body, width=TOTAL_Q * 40, height=44, bg=BOARD, highlightthickness=0)
+        self.dots.pack(pady=(4, 0))
+        tk.Label(self.body, text=f"Question {self.q_num} of {TOTAL_Q}", font=(self.ui_font, 10),
+                 bg=BOARD, fg="#9FB8A7").pack()
+
+        self.prob_lbl = tk.Label(self.body, text=self.problem_text, font=(self.chalk_font, 54, "bold"),
+                                 bg=BOARD, fg=CHALK)
+        self.prob_lbl.pack(pady=(22, 8))
+
+        self.ans_row = tk.Frame(self.body, bg=BOARD)
+        self.ans_row.pack(pady=6)
+        self.entry = tk.Entry(self.ans_row, font=(self.chalk_font, 22, "bold"), width=9, justify="center",
+                              bg="#163021", fg=CHALK, insertbackground=YELLOW, relief="flat",
+                              disabledbackground="#163021", disabledforeground="#9FB8A7",
+                              highlightthickness=2, highlightbackground="#9FB8A7", highlightcolor=YELLOW)
+        self.entry.pack(side="left", ipady=6, padx=(0, 12))
+        self.entry.focus_set()
+        self.entry.bind("<Return>", lambda e: self.check_answer())
+
+        self.submit_btn = self.make_chalk_btn(self.ans_row, "Check", self.check_answer)
+        self.submit_btn.master.pack(side="left")
+
+        self.tries_lbl = tk.Label(self.body, text="", font=(self.ui_font, 11, "bold"), bg=BOARD, fg="#9FB8A7")
+        self.tries_lbl.pack(pady=(14, 0))
+        self.feedback = tk.Label(self.body, text="Type your answer and press Enter",
+                                 font=(self.chalk_font, 15), bg=BOARD, fg=CHALK)
+        self.feedback.pack(pady=(8, 0))
+
+        self.refresh_tries()
+        self.draw_dots()
+        self.pulse_dot()
+
+    # updates the remaining attempts indicator and available marks
+    def refresh_tries(self):
+        if self.tries == 1:
+            self.tries_lbl.config(text="Tries left  \u25cf \u25cf     worth 10 points", fg="#9FB8A7")
+        else:
+            self.tries_lbl.config(text="Tries left  \u25cf \u25cb     worth 5 points", fg=YELLOW)
+
+    # redraws the 10 progress circles coloured by score earned on each question
+    def draw_dots(self):
+        self.dots.delete("all")
+        fills = {10: "#7FD8BE", 5: YELLOW, 0: PINK}
+        for i in range(TOTAL_Q):
+            x = 20 + i * 40
+            if i < len(self.results):
+                self.dots.create_oval(x - 11, 11, x + 11, 33, fill=fills[self.results[i]], outline="")
+            elif i == self.q_num - 1:
+                r = 14 if self.pulse_big else 11
+                self.dots.create_oval(x - r, 22 - r, x + r, 22 + r, outline=YELLOW, width=3)
+            else:
+                self.dots.create_oval(x - 11, 11, x + 11, 33, outline="#9FB8A7", width=2)
+
+    # toggles the active dot radius every 450ms to give a gentle pulsing effect
+    def pulse_dot(self):
+        self.pulse_big = not self.pulse_big
+        self.draw_dots()
+        self.pulse_timer = self.root.after(450, self.pulse_dot)
+
+    # required brief function: checks the answer, updates feedback text and returns a bool
+    def isCorrect(self, user_answer, correct_answer, tries):
+        if user_answer == correct_answer:
+            pts = 10 if tries == 1 else 5
+            self.feedback.config(text=f"Correct!  +{pts} points", fg="#7FD8BE")
+            return True
+        if tries == 1:
+            self.feedback.config(text="Not quite, have another go for 5 points", fg=PINK)
+        else:
+            self.feedback.config(text=f"Unlucky, the answer was {correct_answer}", fg=PINK)
+        return False
+
+    # validates integer input and handles first try, second try and wrong outcomes
+    def check_answer(self):
+        if self.locked:
+            return
+        try:
+            guess = int(self.entry.get().strip())
+        except ValueError:
+            self.feedback.config(text="Numbers only please (minus signs are fine)", fg=PINK)
+            self.shake_box()
+            return
+
+        if self.isCorrect(guess, self.answer, self.tries):
+            self.prob_lbl.config(text=f"{self.problem_text} {self.answer}", fg="#7FD8BE")
+            pts = 10 if self.tries == 1 else 5
+            self.finish_question(guess, pts, 1000)
+        elif self.tries == 1:
+            self.tries = 2
+            self.refresh_tries()
+            self.entry.delete(0, tk.END)
+            self.shake_box()
+        else:
+            self.prob_lbl.config(text=f"{self.problem_text} {self.answer}", fg=PINK)
+            self.shake_box()
+            self.finish_question(guess, 0, 1800)
+
+    # records points and question history then schedules the next question after a short pause
+    def finish_question(self, guess, pts, wait_ms):
+        # lock straight away so pressing Enter twice cant award points twice
+        self.locked = True
+        self.submit_btn.config(state="disabled", bg=BOARD)
+        self.entry.config(state="disabled")
+        self.score += pts
+        self.results.append(pts)
+        self.history.append((self.q_num, self.problem_text, guess, self.answer, self.tries, pts))
+        self.draw_dots()
+        self.pop_score()
+        self.next_timer = self.root.after(wait_ms, self.next_question)
+
+    # briefly scales the score label up and back down when points are added
+    def pop_score(self, step=0):
+        sizes = [16, 20, 24, 21, 18, 16]
+        self.score_lbl.config(text=f"Score  {self.score}", font=(self.chalk_font, sizes[step], "bold"))
+        if step < len(sizes) - 1:
+            self.anim_timer = self.root.after(40, self.pop_score, step + 1)
+
+    # nudges the entry row left and right on invalid or wrong answers
+    def shake_box(self, step=0):
+        offsets = [16, -16, 12, -12, 6, -6, 0]
+        dx = offsets[step]
+        self.ans_row.pack_configure(padx=(max(dx, 0) * 2, max(-dx, 0) * 2))
+        if step < len(offsets) - 1:
+            self.anim_timer = self.root.after(35, self.shake_box, step + 1)
+
+    # maps the final score out of 100 to a letter grade
+    def get_rank(self, score):
+        if score > 90:
+            return "A+"
+        if score >= 80:
+            return "A"
+        if score >= 70:
+            return "B"
+        if score >= 60:
+            return "C"
+        if score >= 50:
+            return "D"
+        return "F"
+
+    # required brief function: shows the final rank, breakdown table and play again prompt
+    def displayResults(self, score):
+        self.clear_screen()
+        self.screen = "results"
+        rank = self.get_rank(score)
+
+        old_best = self.best[self.level]
+        new_best = old_best is None or score > old_best
+        if new_best:
+            self.best[self.level] = score
+
+        first = sum(1 for h in self.history if h[5] == 10)
+        second = sum(1 for h in self.history if h[5] == 5)
+        missed = TOTAL_Q - first - second
+        col = "#7FD8BE" if score >= 70 else YELLOW if score >= 50 else PINK
+
+        self.banner = tk.Canvas(self.body, height=180, bg=BOARD, highlightthickness=0)
+        self.banner.pack(fill="x")
+        self.banner.create_oval(14, 10, 174, 170, outline=col, width=6)
+        self.banner.create_text(94, 90, text=rank, font=(self.chalk_font, 46, "bold"), fill=col)
+        self.score_txt = self.banner.create_text(206, 48, anchor="w", text="Final score: 0 / 100",
+                                                 font=(self.chalk_font, 24, "bold"), fill=CHALK)
+        self.banner.create_text(206, 96, anchor="w", font=(self.ui_font, 12), fill="#9FB8A7",
+                                text=f"{first} right first time,  {second} on the second go,  {missed} missed")
+        best_msg = (f"New best score for {LEVELS[self.level][0]}!" if new_best
+                    else f"Your best on {LEVELS[self.level][0]} is still {self.best[self.level]}")
+        self.banner.create_text(206, 132, anchor="w", text=best_msg,
+                                font=(self.ui_font, 12, "bold"), fill=YELLOW)
+
+        self.count_score(0, score)
+        if score > 90:
+            self.next_timer = self.root.after(400, self.drop_confetti)
+
+        cols = ("q", "problem", "yours", "answer", "tries", "pts")
+        heads = ("Q", "Question", "Your answer", "Right answer", "Attempts", "Points")
+        table = ttk.Treeview(self.body, columns=cols, show="headings", height=10, style="Chalk.Treeview")
+        for c, h in zip(cols, heads):
+            table.heading(c, text=h)
+            table.column(c, anchor="center", width=40 if c == "q" else 110)
+        table.tag_configure("full", foreground="#7FD8BE")
+        table.tag_configure("half", foreground=YELLOW)
+        table.tag_configure("zero", foreground=PINK)
+        for row in self.history:
+            tag = {10: "full", 5: "half", 0: "zero"}[row[5]]
+            table.insert("", "end", values=row, tags=(tag,))
+        table.pack(fill="both", expand=True, pady=(6, 12))
+
+        bottom = tk.Frame(self.body, bg=BOARD)
+        bottom.pack(fill="x")
+        tk.Label(bottom, text="Fancy another round?", font=(self.chalk_font, 16, "bold"),
+                 bg=BOARD, fg=CHALK).pack(side="left")
+        self.make_chalk_btn(bottom, "Quit", self.close_app, colour=PINK).master.pack(side="right")
+        self.make_chalk_btn(bottom, "Change level", self.displayMenu, colour="#9FB8A7").master.pack(side="right", padx=8)
+        self.make_chalk_btn(bottom, "Play again", lambda: self.start_quiz(self.level), colour="#7FD8BE").master.pack(side="right")
+
+    # counts the displayed final score up from 0 on the results banner
+    def count_score(self, current, target):
+        self.banner.itemconfig(self.score_txt, text=f"Final score: {current} / 100")
+        if current < target:
+            self.anim_timer = self.root.after(14, self.count_score, current + 1, target)
+
+    # spawns coloured chalk confetti pieces across the banner for A+ scores
+    def drop_confetti(self):
+        w = max(self.banner.winfo_width(), 600)
+        bits = []
+        for _ in range(70):
+            x = random.randint(0, w)
+            y = random.randint(-140, 0)
+            c = random.choice(["#7FD8BE", YELLOW, PINK, CHALK])
+            item = self.banner.create_rectangle(x, y, x + 6, y + 10, fill=c, outline="")
+            bits.append((item, random.uniform(2.5, 5), random.uniform(-1.5, 1.5)))
+        self.animate_confetti(bits, 0)
+
+    # moves each confetti piece downward until 75 frames have passed then clears them
+    def animate_confetti(self, bits, frame):
+        for item, speed, drift in bits:
+            self.banner.move(item, drift, speed)
+        if frame < 75:
+            self.next_timer = self.root.after(30, self.animate_confetti, bits, frame + 1)
+        else:
+            for item, _, _ in bits:
+                self.banner.delete(item)
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = MathsQuiz(root)
+    root.mainloop()

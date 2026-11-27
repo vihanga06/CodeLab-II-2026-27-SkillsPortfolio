@@ -224,3 +224,154 @@ class AlexaJokeApp:
             self.ring_angle = (self.ring_angle + 18) % 360
             self.draw_ring()
         self.ring_job = self.root.after(45, self.spin_ring)
+        
+# builds a short sine wave chime in memory so no external wav files are needed
+    def build_chime(self, notes):
+        buf = io.BytesIO()
+        rate = 22050
+        with wave.open(buf, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(rate)
+            data = bytearray()
+            for freq, ms in notes:
+                samples = int(rate * ms / 1000)
+                for i in range(samples):
+                    # fade the start and end of each note to avoid a sharp click
+                    fade = min(1.0, i / 350, (samples - i) / 500)
+                    val = int(9500 * fade * math.sin(2 * math.pi * freq * i / rate))
+                    data += struct.pack("<h", val)
+            wav.writeframes(data)
+        return buf.getvalue()
+
+    # terminates any still speaking PowerShell voice process cleanly
+    def stop_speech(self):
+        if self.speech_proc is not None and self.speech_proc.poll() is None:
+            try:
+                self.speech_proc.terminate()
+            except OSError:
+                pass
+        self.speech_proc = None
+
+    # plays the wav chime asynchronously and speaks the text using Windows TTS
+    def speak(self, chime_data, text=""):
+        if not self.sound_on:
+            return
+        self.stop_speech()
+        if winsound is not None:
+            try:
+                winsound.PlaySound(chime_data, winsound.SND_MEMORY | winsound.SND_ASYNC)
+            except RuntimeError:
+                pass
+
+        # run Windows built in speech voice in a hidden powershell process so Tkinter stays responsive
+        if text and os.name == "nt":
+            safe_txt = text.replace("'", " ").replace('"', " ")
+            cmd = (
+                "Add-Type -AssemblyName System.Speech; "
+                "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                "try { $s.SelectVoice('Microsoft Zira Desktop') } catch {}; "
+                f"$s.Speak('{safe_txt}')"
+            )
+            try:
+                flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                self.speech_proc = subprocess.Popen(
+                    ["powershell", "-NoProfile", "-Command", cmd],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=flags,
+                )
+            except OSError:
+                self.speech_proc = None
+
+    # flips chimes and speech audio on or off from the header button
+    def toggle_sound(self):
+        self.sound_on = not self.sound_on
+        if not self.sound_on:
+            self.stop_speech()
+            self.sound_btn.config(text="Sound: OFF", bg="#2A313A", fg="#677482")
+        else:
+            self.sound_btn.config(text="Sound: ON", bg=ECHO_BLUE, fg="#FFFFFF")
+
+    # lets Space reveal the punchline when a setup is waiting
+    def on_space(self, _event):
+        if str(self.punch_btn["state"]) == "normal":
+            self.show_punchline()
+
+    # draws the next joke from the shuffled deck, updates the screen and speaks the setup
+    def tell_joke(self):
+        if not self.jokes:
+            return
+        if self.type_job is not None:
+            self.root.after_cancel(self.type_job)
+            self.type_job = None
+
+        # reshuffle once every joke in the deck has been shown and avoid back to back repeats
+        if self.deck_pos >= len(self.jokes):
+            prev = self.current
+            random.shuffle(self.jokes)
+            if len(self.jokes) > 1 and self.jokes[0] == prev:
+                self.jokes[0], self.jokes[-1] = self.jokes[-1], self.jokes[0]
+            self.deck_pos = 0
+
+        self.current = self.jokes[self.deck_pos]
+        self.deck_pos += 1
+
+        self.ring_active = True
+        self.status_text = "LISTENING"
+        self.draw_ring()
+        self.light_bar.config(bg=CYAN)
+        self.counter_lbl.config(text=f"Joke {self.deck_pos:02d} / {len(self.jokes):02d}")
+        self.badge.config(text="ALEXA  |  JOKE SETUP", bg="#E3F6FD", fg=ECHO_BLUE)
+        self.setup_label.config(text=self.current[0])
+        self.punch_label.config(text="")
+        self.set_punch_ready(True)
+        self.speak(self.wake_chime, self.current[0])
+
+    # alias for the Next Joke button and Enter key shortcut
+    def next_joke(self):
+        self.tell_joke()
+
+    # triggers the punchline chime, spoken audio and typewriter animation
+    def show_punchline(self):
+        if self.current is None:
+            return
+        if self.type_job is not None:
+            self.root.after_cancel(self.type_job)
+            self.type_job = None
+
+        self.set_punch_ready(False)
+        self.ring_active = True
+        self.status_text = "SPEAKING"
+        self.draw_ring()
+        self.light_bar.config(bg=ECHO_BLUE)
+        self.badge.config(text="ALEXA  |  PUNCHLINE", bg="#D6EEFA", fg=ECHO_BLUE)
+        self.speak(self.punch_chime, self.current[1])
+        self.type_punchline(self.current[1], 0)
+
+    # reveals the punchline one character every 22ms then stops the ring spin
+    def type_punchline(self, text, idx):
+        if idx <= len(text):
+            self.punch_label.config(text=text[:idx])
+            self.type_job = self.root.after(22, self.type_punchline, text, idx + 1)
+        else:
+            self.type_job = None
+            self.ring_active = False
+            self.status_text = "READY"
+            self.light_bar.config(bg=CYAN)
+            self.draw_ring()
+
+    # stops speech and active timers before closing the window
+    def quit_app(self):
+        self.stop_speech()
+        if self.type_job is not None:
+            self.root.after_cancel(self.type_job)
+        if self.ring_job is not None:
+            self.root.after_cancel(self.ring_job)
+        self.root.destroy()
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = AlexaJokeApp(root)
+    root.mainloop()

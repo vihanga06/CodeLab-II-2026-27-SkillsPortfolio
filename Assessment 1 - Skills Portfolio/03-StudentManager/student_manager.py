@@ -358,3 +358,313 @@ class StudentManager:
             self.kpi_low_sub.config(text=f"{bot.percentage():.1f}%  ({bot.total()} / 160)")
 
         self.draw_grade_bar()
+        
+# keeps the top dropdown synced whenever the user clicks a row in the table
+    def sync_row_to_combo(self, _event):
+        sel = self.table.selection()
+        if not sel:
+            return
+        code_val = int(sel[0])
+        for i, s in enumerate(self.students):
+            if s.code == code_val:
+                self.combo.current(i)
+                break
+
+    # repopulates the Treeview table and footer summary for whichever menu option ran
+    def show_rows(self, rows, title, footer):
+        self.heading.config(text=title)
+        self.table.delete(*self.table.get_children())
+        for s in rows:
+            pct = s.percentage()
+            g = s.grade()
+            self.table.insert("", "end", iid=str(s.code), values=(
+                s.name, s.code, f"{s.cw_total()} / 60", f"{s.exam} / 100", f"{pct:.2f}%", g
+            ), tags=(g,))
+        self.summary.config(text=footer)
+
+    # builds the class total and average percentage string for summary views
+    def class_summary(self, rows):
+        if not rows:
+            return "No students in the class"
+        avg = sum(s.percentage() for s in rows) / len(rows)
+        return f"Total students in class: {len(rows)}     |     Average percentage mark: {avg:.2f}%"
+
+    # matches digits against student code and text against exact or partial student names
+    def find_matches(self, query):
+        q = query.lower()
+        if q.isascii() and q.isdigit():
+            return [s for s in self.students if s.code == int(q)]
+        exact = [s for s in self.students if s.name.lower() == q]
+        if exact:
+            return exact
+        return [s for s in self.students if q in s.name.lower()]
+
+    # resolves the target student from search box, dropdown or selected table row
+    def pick_student(self):
+        q = self.search.get().strip()
+        if q:
+            hits = self.find_matches(q)
+            if not hits:
+                messagebox.showwarning("Not found", f"No student matches '{q}'.")
+                return None
+            if len(hits) > 1:
+                names = "\n".join(f"{m.code}  {m.name}" for m in hits)
+                messagebox.showwarning("Multiple matches", f"Be more specific or use the code:\n\n{names}")
+                return None
+            return hits[0]
+
+        idx = self.combo.current()
+        if idx >= 0:
+            return self.students[idx]
+
+        sel = self.table.selection()
+        if sel:
+            code_val = int(sel[0])
+            for s in self.students:
+                if s.code == code_val:
+                    return s
+
+        messagebox.showinfo("Pick a student", "Select a student from the dropdown, click a row, or type a name/code.")
+        return None
+
+    # menu option 1: displays every student record with class summary and refreshes overview stats
+    def view_all(self):
+        self.refresh_stats()
+        self.show_rows(self.students, "All Student Records", self.class_summary(self.students))
+
+    # menu option 2: displays the single selected student record
+    def view_one(self):
+        s = self.pick_student()
+        if s is None:
+            return
+        self.search.delete(0, tk.END)
+        self.show_rows([s], f"Individual Record: {s.name}",
+                       f"Student {s.code}  |  Total: {s.total()} / 160  |  Grade: {s.grade()}")
+
+    # shared helper for highest and lowest scores including tied totals
+    def show_extreme(self, highest):
+        if not self.students:
+            messagebox.showinfo("No students", "There are no student records loaded.")
+            return
+        totals = [s.total() for s in self.students]
+        target = max(totals) if highest else min(totals)
+        # keep all tied students if more than one shares the top or bottom total
+        rows = [s for s in self.students if s.total() == target]
+        word = "Highest" if highest else "Lowest"
+        self.show_rows(rows, f"{word} Overall Score",
+                       f"{word} total mark: {target} / 160 ({target / 160 * 100:.2f}%)")
+
+    # menu option 3: shows the student with the highest overall total
+    def show_highest(self):
+        self.show_extreme(True)
+
+    # menu option 4: shows the student with the lowest overall total
+    def show_lowest(self):
+        self.show_extreme(False)
+
+    # creates a modal Toplevel dialog window that blocks the main window until closed
+    def open_popup(self, title):
+        win = tk.Toplevel(self.root)
+        win.title(title)
+        win.configure(bg=WHITE, padx=24, pady=20)
+        win.resizable(False, False)
+        win.transient(self.root)
+        win.grab_set()
+        return win
+
+    # writes the updated line 1 count and all CSV rows back to studentMarks.txt
+    def save_students(self):
+        out = [str(len(self.students))] + [s.to_csv() for s in self.students]
+        try:
+            with open(self.data_file, "w", encoding="utf-8", newline="\n") as f:
+                f.write("\n".join(out))
+            return True
+        except OSError as err:
+            messagebox.showerror("Save error", f"Could not save studentMarks.txt:\n{err}")
+            return False
+
+    # menu option 5: opens a dialog to sort records ascending or descending
+    def sort_dialog(self):
+        if not self.students:
+            messagebox.showinfo("No students", "There are no student records to sort.")
+            return
+        win = self.open_popup("Sort Student Records")
+
+        tk.Label(win, text="Sort by:", font=("Segoe UI", 10, "bold"), bg=WHITE, fg=INK).grid(row=0, column=0, sticky="w", pady=6)
+        sort_box = ttk.Combobox(win, state="readonly", width=22, font=("Segoe UI", 10),
+                                values=["Overall percentage", "Student name", "Student number"])
+        sort_box.current(0)
+        sort_box.grid(row=0, column=1, padx=(12, 0), pady=6)
+
+        order = tk.StringVar(value="desc")
+        tk.Radiobutton(win, text="Ascending", variable=order, value="asc", bg=WHITE, fg=INK,
+                       activebackground=WHITE, selectcolor=WHITE, font=("Segoe UI", 10)).grid(row=1, column=0, sticky="w", pady=6)
+        tk.Radiobutton(win, text="Descending", variable=order, value="desc", bg=WHITE, fg=INK,
+                       activebackground=WHITE, selectcolor=WHITE, font=("Segoe UI", 10)).grid(row=1, column=1, sticky="w", padx=(12, 0), pady=6)
+
+        def apply_sort():
+            choice = sort_box.current()
+            if choice == 0:
+                key_fn = lambda s: s.percentage()
+            elif choice == 1:
+                key_fn = lambda s: s.name.lower()
+            else:
+                key_fn = lambda s: s.code
+            desc = order.get() == "desc"
+            rows = sorted(self.students, key=key_fn, reverse=desc)
+            self.show_rows(rows, f"Sorted by {sort_box.get()} ({'Descending' if desc else 'Ascending'})",
+                           self.class_summary(rows))
+            win.destroy()
+
+        btns = tk.Frame(win, bg=WHITE)
+        btns.grid(row=2, column=0, columnspan=2, pady=(16, 0))
+        tk.Button(btns, text="Apply Sort", command=apply_sort, font=("Segoe UI", 10, "bold"),
+                  bg=GOLD, fg=INK, relief="flat", padx=18, pady=7, cursor="hand2").pack(side="left", padx=5)
+        tk.Button(btns, text="Cancel", command=win.destroy, font=("Segoe UI", 10, "bold"),
+                  bg=NAVY, fg="#FAF8F3", relief="flat", padx=18, pady=7, cursor="hand2").pack(side="left", padx=5)
+
+    # checks one input field for valid ranges, commas or duplicate student codes
+    def validate_field(self, key, raw, ignore=None):
+        text = raw.strip()
+        if key == "name":
+            if not text:
+                return None, "Student name cannot be empty."
+            if "," in text:
+                return None, "Student name cannot contain commas because the file is comma separated."
+            if not any(ch.isalpha() for ch in text):
+                return None, "Student name needs at least one letter."
+            return text, ""
+
+        # isascii and isdigit reject underscores like 1_000 that int() would otherwise accept
+        if not (text.isascii() and text.isdigit()):
+            return None, "Please enter a non negative whole number."
+        val = int(text)
+
+        if key == "code":
+            if val < 1000 or val > 9999:
+                return None, "Student code must be between 1000 and 9999."
+            for s in self.students:
+                if s.code == val and s is not ignore:
+                    return None, f"Student code {val} already belongs to {s.name}."
+        elif key == "exam":
+            if val > 100:
+                return None, "Exam mark must be between 0 and 100."
+        elif val > 20:
+            return None, "Coursework marks must each be between 0 and 20."
+        return val, ""
+
+    # menu option 6: opens a validated form to add a new student and save to file
+    def add_dialog(self):
+        win = self.open_popup("Add Student Record")
+        inputs = {}
+        for row, (key, label) in enumerate(FIELDS):
+            tk.Label(win, text=label, font=("Segoe UI", 10), bg=WHITE, fg=INK).grid(row=row, column=0, sticky="w", pady=6)
+            ent = tk.Entry(win, width=24, font=("Segoe UI", 10), bg=BG, fg=INK, relief="flat",
+                           highlightthickness=1, highlightbackground="#DDD6C7", highlightcolor=NAVY)
+            ent.grid(row=row, column=1, padx=(14, 0), pady=6, ipady=4)
+            inputs[key] = ent
+        inputs["code"].focus_set()
+
+        def save_new():
+            vals = {}
+            for key, _ in FIELDS:
+                val, err = self.validate_field(key, inputs[key].get())
+                if err:
+                    messagebox.showerror("Invalid input", err, parent=win)
+                    inputs[key].focus_set()
+                    return
+                vals[key] = val
+            stu = Student(vals["code"], vals["name"], vals["cw1"], vals["cw2"], vals["cw3"], vals["exam"])
+            self.students.append(stu)
+            # undo the append if writing to disk fails so memory matches the file
+            if not self.save_students():
+                self.students.pop()
+                return
+            self.refresh_stats()
+            self.view_all()
+            self.table.selection_set(str(stu.code))
+            self.table.see(str(stu.code))
+            win.destroy()
+            messagebox.showinfo("Saved", f"{stu.name} ({stu.code}) was added to studentMarks.txt.")
+
+        btns = tk.Frame(win, bg=WHITE)
+        btns.grid(row=len(FIELDS), column=0, columnspan=2, pady=(16, 0))
+        tk.Button(btns, text="Add Student", command=save_new, font=("Segoe UI", 10, "bold"),
+                  bg=GOLD, fg=INK, relief="flat", padx=18, pady=7, cursor="hand2").pack(side="left", padx=5)
+        tk.Button(btns, text="Cancel", command=win.destroy, font=("Segoe UI", 10, "bold"),
+                  bg=NAVY, fg="#FAF8F3", relief="flat", padx=18, pady=7, cursor="hand2").pack(side="left", padx=5)
+
+    # menu option 7: confirms and deletes the chosen student then updates studentMarks.txt
+    def delete_student(self):
+        s = self.pick_student()
+        if s is None:
+            return
+        if not messagebox.askyesno("Confirm Delete", f"Permanently delete {s.name} ({s.code}) from studentMarks.txt?"):
+            return
+        idx = self.students.index(s)
+        self.students.remove(s)
+        if not self.save_students():
+            self.students.insert(idx, s)
+            return
+        self.search.delete(0, tk.END)
+        self.refresh_stats()
+        self.view_all()
+        messagebox.showinfo("Deleted", f"{s.name} ({s.code}) was removed and studentMarks.txt was updated.")
+
+    # menu option 8: opens a sub menu dialog to edit any single field and save to file
+    def update_dialog(self):
+        s = self.pick_student()
+        if s is None:
+            return
+        win = self.open_popup(f"Update Record: {s.name}")
+
+        preview = tk.Label(win, text="", font=("Segoe UI", 10, "bold"), bg=BG, fg=INK,
+                           justify="left", padx=12, pady=8)
+        preview.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+
+        def update_preview():
+            preview.config(text=f"{s.name} ({s.code})\n"
+                                f"CW1: {s.cw1}   CW2: {s.cw2}   CW3: {s.cw3}   |   Exam: {s.exam}   |   {s.percentage():.2f}% ({s.grade()})")
+        update_preview()
+
+        tk.Label(win, text="Field to update:", font=("Segoe UI", 10), bg=WHITE, fg=INK).grid(row=1, column=0, sticky="w", pady=6)
+        field_box = ttk.Combobox(win, state="readonly", width=26, font=("Segoe UI", 10),
+                                 values=[lbl for _, lbl in FIELDS])
+        field_box.current(1)
+        field_box.grid(row=1, column=1, padx=(14, 0), pady=6)
+
+        tk.Label(win, text="New value:", font=("Segoe UI", 10), bg=WHITE, fg=INK).grid(row=2, column=0, sticky="w", pady=6)
+        val_entry = tk.Entry(win, width=28, font=("Segoe UI", 10), bg=BG, fg=INK, relief="flat",
+                             highlightthickness=1, highlightbackground="#DDD6C7", highlightcolor=NAVY)
+        val_entry.grid(row=2, column=1, padx=(14, 0), pady=6, ipady=4)
+        val_entry.focus_set()
+
+        def apply_change():
+            key = FIELDS[field_box.current()][0]
+            val, err = self.validate_field(key, val_entry.get(), ignore=s)
+            if err:
+                messagebox.showerror("Invalid input", err, parent=win)
+                return
+            old = getattr(s, key)
+            setattr(s, key, val)
+            if not self.save_students():
+                setattr(s, key, old)
+                return
+            self.search.delete(0, tk.END)
+            self.refresh_stats()
+            self.show_rows([s], f"Updated Record: {s.name}", f"Changes saved to {os.path.basename(self.data_file)}")
+            val_entry.delete(0, tk.END)
+            update_preview()
+
+        btns = tk.Frame(win, bg=WHITE)
+        btns.grid(row=3, column=0, columnspan=2, pady=(16, 0))
+        tk.Button(btns, text="Save Change", command=apply_change, font=("Segoe UI", 10, "bold"),
+                  bg=GOLD, fg=INK, relief="flat", padx=18, pady=7, cursor="hand2").pack(side="left", padx=5)
+        tk.Button(btns, text="Done", command=win.destroy, font=("Segoe UI", 10, "bold"),
+                  bg=NAVY, fg="#FAF8F3", relief="flat", padx=18, pady=7, cursor="hand2").pack(side="left", padx=5)
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = StudentManager(root)
+    root.mainloop()
